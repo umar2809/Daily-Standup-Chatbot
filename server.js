@@ -62,7 +62,7 @@ app.message(async ({ message, say, context, client }) => {
         {
           role: "system",
           content:
-            "You are a helpful assistant that summarizes worklogs into short paragraphs. The first line is the project name",
+            "You are a helpful assistant that summarizes worklogs into short paragraphs. The first line is the project name and always summarize the worlog in the form of a short paragraph.",
         },
         {
           role: "user",
@@ -70,8 +70,6 @@ app.message(async ({ message, say, context, client }) => {
         },
       ],
     });
-
-    console.log(summaryResponse.choices);
 
     const summary = summaryResponse.choices[0].message.content.trim();
 
