@@ -1,18 +1,63 @@
 require("dotenv").config();
 const { OpenAI } = require("openai");
-const { App } = require("@slack/bolt");
+const express = require("express");
+const axios = require("axios");
+const { WebClient } = require("@slack/web-api");
 
-const signingSecret = process.env.SLACK_SIGNING_SECRET;
+const app = express();
+
 const botToken = process.env.SLACK_BOT_TOKEN;
+
+const clientSecret = process.env.CLIENT_SECRET;
+
 const port = process.env.PORT || 4000;
 
-const app = new App({
-  signingSecret: signingSecret,
-  token: botToken,
-});
+const clientId = process.env.CLIENT_ID;
+
+const redirectUri = process.env.REDIRECT_URI;
+
+const client = new WebClient(botToken);
+
+app.use(express.json());
+
+const scope =
+  "app_mentions:read,channels:history,chat:write,groups:history,im:history,mpim:history,channels:join,channels:read,groups:read,mpim:read,im:read";
+
+const oauthUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(
+  scope
+)}&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+});
+
+app.get("/slack/oauth_redirect", async (req, res) => {
+  const { code } = req.query;
+
+  try {
+    const response = await axios.post(
+      "https://slack.com/api/oauth.v2.access",
+      null,
+      {
+        params: {
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          redirect_uri: redirectUri,
+        },
+      }
+    );
+
+    if (response.data.ok) {
+      const accessToken = response.data.access_token;
+      res.send("Authorization successful! You can close this window.");
+    } else {
+      res.send(`Error: ${response.data.error}`);
+    }
+  } catch (error) {
+    console.error("Error during Slack OAuth:", error);
+    res.status(500).send("Internal Server Error");
+  }
 });
 
 const getChannelInfoById = async (client, channelId) => {
@@ -25,22 +70,34 @@ const getChannelInfoById = async (client, channelId) => {
   }
 };
 
-app.message(async ({ message, say, context, client }) => {
-  if (message.subtype && message.subtype === "bot_message") {
+app.post("/slack/events", async (req, res) => {
+  res.sendStatus(200);
+
+  const { event, authorizations } = req.body;
+
+  if (!event || event.type !== "message") {
+    console.log("Event is not a message or event is undefined");
     return;
   }
 
-  if (message.text && message.text.includes(`<@${context.botUserId}>`)) {
-    return;
+  const botUserId = authorizations[0].user_id;
+
+  if (event.user === botUserId) {
+    console.log("Message is a bot message or mentions the bot itself");
+    return 0;
   }
 
   const channelMentions = [];
   const channelMentionPattern = /<#(\w+)\|(\w+)>/g;
 
-  const matches = message.text.match(channelMentionPattern);
+  const matches = event.text.match(channelMentionPattern);
   if (!matches) {
-    await say("No channels mentioned.");
-    return;
+    await client.chat.postMessage({
+      channel: event.channel,
+      text: "No channels mentioned.",
+    });
+    console.log("No channels mentioned in the message");
+    return 0;
   }
 
   for (const match of matches) {
@@ -48,13 +105,19 @@ app.message(async ({ message, say, context, client }) => {
     channelMentions.push({ channelId, channelName });
   }
 
-  const originChannelId = message.channel;
+  console.log(channelMentions);
 
-  const messageChunks = message.text.split(channelMentionPattern);
+  const originChannelId = event.channel;
+  const messageChunks = event.text.split(channelMentionPattern);
 
   for (let i = 0; i < channelMentions.length; i++) {
     const { channelId, channelName } = channelMentions[i];
-    const text = messageChunks[i * 3 + 3].trim();
+    const text = messageChunks[i * 3 + 3]?.trim(); // Ensure this is defined
+
+    if (!text) {
+      console.log(`No text found for channel mention ${channelName}`);
+      continue;
+    }
 
     const summaryResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
@@ -62,7 +125,7 @@ app.message(async ({ message, say, context, client }) => {
         {
           role: "system",
           content:
-            "You are a helpful assistant that summarizes worklogs into short paragraphs. The first line is the project name and always summarize the worlog in the form of a short paragraph.",
+            "You are a helpful assistant that summarizes worklogs into short paragraphs. The first line is the project name and always summarize the worklog in the form of a short paragraph.",
         },
         {
           role: "user",
@@ -86,26 +149,28 @@ app.message(async ({ message, say, context, client }) => {
           text: `This is work log summary\n${summary}`,
         });
       } else if (channelId === originChannelId) {
-        await say("Cannot send message to the same channel it was sent from.");
+        await client.chat.postMessage({
+          channel: originChannelId,
+          text: "Cannot send message to the same channel it was sent from.",
+        });
       } else {
-        await say(
-          `Sorry, I am not a member of the channel named ${channelName}.`
-        );
+        await client.chat.postMessage({
+          channel: originChannelId,
+          text: `Sorry, I am not a member of the channel named ${channelName}.`,
+        });
       }
     } catch (error) {
-      console.error(error);
-      await say(
-        `Sorry, <@${message.user}>, I couldn't send a message to the channel.`
-      );
+      console.error(`Error posting message to channel ${channelName}:`, error);
+      await client.chat.postMessage({
+        channel: originChannelId,
+        text: `Sorry, <@${event.user}>, I couldn't send a message to the channel ${channelName}.`,
+      });
     }
   }
+
+  return 0;
 });
 
-(async () => {
-  try {
-    await app.start(port);
-    console.log(`Server running on port ${port}`);
-  } catch (error) {
-    console.error(`Failed to start server: ${error}`);
-  }
-})();
+const server = app.listen(port, () => {
+  console.log("OAuth URL:", oauthUrl);
+});
