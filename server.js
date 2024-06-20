@@ -71,6 +71,11 @@ const getChannelInfoById = async (client, channelId) => {
 };
 
 app.post("/slack/events", async (req, res) => {
+  if (req.body.type === "url_verification") {
+    res.send({ challenge: req.body.challenge });
+    return;
+  }
+
   res.sendStatus(200);
 
   const { event, authorizations } = req.body;
@@ -84,19 +89,41 @@ app.post("/slack/events", async (req, res) => {
 
   if (event.user === botUserId) {
     console.log("Message is a bot message or mentions the bot itself");
-    return 0;
+    return;
   }
 
   const channelMentions = [];
   const channelMentionPattern = /<#(\w+)\|(\w+)>/g;
 
+  const originChannelId = event.channel;
+  const messageChunks = event.text.split(channelMentionPattern);
+
   const matches = event.text.match(channelMentionPattern);
+
   if (!matches) {
+    const text = messageChunks[0]?.trim();
+
+    const summaryResponse = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a helpful assistant that summarizes worklogs into short paragraphs with 3 to 4 lines. The first line is the project name and always summarize the worklog in the form of a e to 4 lines short paragraph.",
+        },
+        {
+          role: "user",
+          content: text,
+        },
+      ],
+    });
+
+    const summary = summaryResponse.choices[0].message.content.trim();
+
     await client.chat.postMessage({
       channel: event.channel,
-      text: "No channels mentioned.",
+      text: `This is work log summary\n${summary}`,
     });
-    console.log("No channels mentioned in the message");
     return 0;
   }
 
@@ -104,11 +131,6 @@ app.post("/slack/events", async (req, res) => {
     const [, channelId, channelName] = match.match(/<#(\w+)\|(\w+)>/);
     channelMentions.push({ channelId, channelName });
   }
-
-  console.log(channelMentions);
-
-  const originChannelId = event.channel;
-  const messageChunks = event.text.split(channelMentionPattern);
 
   for (let i = 0; i < channelMentions.length; i++) {
     const { channelId, channelName } = channelMentions[i];
@@ -167,8 +189,6 @@ app.post("/slack/events", async (req, res) => {
       });
     }
   }
-
-  return 0;
 });
 
 const server = app.listen(port, () => {
