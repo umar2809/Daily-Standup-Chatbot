@@ -3,7 +3,7 @@ name: Node Docker CI/CD
 on:
   push:
     branches:
-      - main
+      - features
 
 jobs:
   build-and-push:
