@@ -107,7 +107,7 @@ app.post("/slack/events", async (req, res) => {
     const summaryResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
-        { role: "system", content: "You are a helpful assistant that summarizes worklogs into 3–4 lines." },
+        { role: "system", content: "Summarize the following worklog into exactly 6–7 clear bullet points. Each point should represent a distinct task or update." },
         { role: "user", content: cleanedText },
       ],
     });
@@ -142,7 +142,7 @@ app.post("/slack/events", async (req, res) => {
     const summaryResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
-        { role: "system", content: "Summarize developer worklog into 6–7 clear bullet points." },
+        { role: "system", content: "Summarize the following worklog into 6–7 clear bullet points." },
         { role: "user", content: cleanedText },
       ],
     });
