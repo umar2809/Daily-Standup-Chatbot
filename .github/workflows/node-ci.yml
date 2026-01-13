@@ -8,22 +8,10 @@ on:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    uses: umar2809/Reuse-able-workflows-for-Node-js-/.github/workflows/node-reusable-ci.yml@main
+    with:
+      node-version: 18
 
-    steps:
-      # Checkout repository
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Setup Node.js
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-
-      # Install dependencies
-      - name: Install dependencies
-        run: npm install
 
      
 
