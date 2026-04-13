@@ -8,47 +8,50 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Setup SSH
+      - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh/
           echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          echo "${{ secrets.AWS_HOST }}" > ~/.ssh/host
-          echo "${{ secrets.AWS_USER }}" > ~/.ssh/user
+          # Convert key to proper format if needed
+          ssh-keygen -p -m PEM -f ~/.ssh/deploy_key -P "" -N "" 2>/dev/null || true
       
       - name: Test SSH connection
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $(cat ~/.ssh/user)@$(cat ~/.ssh/host) "echo 'SSH connection successful'"
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} "echo 'SSH connection successful'"
       
       - name: Deploy to EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $(cat ~/.ssh/user)@$(cat ~/.ssh/host) << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
             cd /home/ubuntu/Daily-Standup-Chatbot
-            echo "Pulling latest code..."
+            echo "Pulling latest code from features branch..."
             git pull origin features
             echo "Building Docker image..."
-            sudo docker build -t daily-standup-chatbot:latest .
+            docker build -t daily-standup-chatbot:latest .
             echo "Stopping old container..."
-            sudo docker stop daily-standup-chatbot 2>/dev/null || true
-            sudo docker rm daily-standup-chatbot 2>/dev/null || true
+            docker stop daily-standup-chatbot 2>/dev/null || true
+            docker rm daily-standup-chatbot 2>/dev/null || true
             echo "Starting new container..."
-            sudo docker run -d \
+            docker run -d \
               --name daily-standup-chatbot \
               -p 4000:4000 \
               --env-file .env \
               --restart unless-stopped \
               daily-standup-chatbot:latest
-            echo "Cleaning up..."
-            sudo docker image prune -f
+            echo "Cleaning up old images..."
+            docker image prune -f
             echo "✅ Deployment completed successfully!"
           EOF
       
       - name: Verify deployment
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $(cat ~/.ssh/user)@$(cat ~/.ssh/host) << 'EOF'
-            curl -X POST http://localhost:4000/slack/events -H "Content-Type: application/json" -d '{"type":"url_verification","challenge":"test123"}'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
+            curl -X POST http://localhost:4000/slack/events \
+              -H "Content-Type: application/json" \
+              -d '{"type":"url_verification","challenge":"test123"}'
           EOF
