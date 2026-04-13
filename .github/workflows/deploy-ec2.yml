@@ -1,0 +1,54 @@
+name: Deploy Features Branch to EC2
+
+on:
+  push:
+    branches: [ features ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "${{ secrets.AWS_HOST }}" > ~/.ssh/host
+          echo "${{ secrets.AWS_USER }}" > ~/.ssh/user
+      
+      - name: Test SSH connection
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $(cat ~/.ssh/user)@$(cat ~/.ssh/host) "echo 'SSH connection successful'"
+      
+      - name: Deploy to EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $(cat ~/.ssh/user)@$(cat ~/.ssh/host) << 'EOF'
+            cd /home/ubuntu/Daily-Standup-Chatbot
+            echo "Pulling latest code..."
+            git pull origin features
+            echo "Building Docker image..."
+            sudo docker build -t daily-standup-chatbot:latest .
+            echo "Stopping old container..."
+            sudo docker stop daily-standup-chatbot 2>/dev/null || true
+            sudo docker rm daily-standup-chatbot 2>/dev/null || true
+            echo "Starting new container..."
+            sudo docker run -d \
+              --name daily-standup-chatbot \
+              -p 4000:4000 \
+              --env-file .env \
+              --restart unless-stopped \
+              daily-standup-chatbot:latest
+            echo "Cleaning up..."
+            sudo docker image prune -f
+            echo "✅ Deployment completed successfully!"
+          EOF
+      
+      - name: Verify deployment
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $(cat ~/.ssh/user)@$(cat ~/.ssh/host) << 'EOF'
+            curl -X POST http://localhost:4000/slack/events -H "Content-Type: application/json" -d '{"type":"url_verification","challenge":"test123"}'
+          EOF
