@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  chatbot:
+    build: .
+    container_name: daily-standup-chatbot
+    restart: always
+    ports:
+      - "4000:4000"  # Match your PORT=4000
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - SLACK_REDIRECT_URI=${SLACK_REDIRECT_URI}
+    env_file:
+      - .env  # Load all variables from .env file
+    volumes:
+      # Mount logs directory if you need persistent logs
+      - ./logs:/app/logs
+      # Mount node_modules to avoid permission issues
+      - /app/node_modules
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health" || "exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Set working directory
+    working_dir: /app
+    # Security: don't run as root
+    user: "node"
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # If you're using PM2 inside Docker (check your ecosystem.config.js)
+  # Add PM2 specific configuration

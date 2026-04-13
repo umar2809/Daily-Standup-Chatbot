@@ -1,18 +1,167 @@
-name: Node.js CI
+name: Slack Bot CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - features
+    branches: [ main, features ]
   pull_request:
+    branches: [ main ]
+
+env:
+  DOCKER_IMAGE_NAME: daily-standup-chatbot
+  DOCKER_REGISTRY: docker.io  # Change to your registry (GHCR, Docker Hub, etc.)
 
 jobs:
-  build-test:
-    uses: umar2809/Reuse-able-workflows-for-Node-js-/.github/workflows/node-reusable-ci.yml@main
-    with:
-      node-version: 18
+  # Job 1: Lint and Test
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run linter (if you have ESLint configured)
+      run: |
+        if [ -f package.json ] && grep -q eslint package.json; then
+          npm run lint
+        else
+          echo "No linter configured, skipping..."
+        fi
+    
+    - name: Run security audit
+      run: npm audit --production
+    
+    - name: Check for vulnerable dependencies
+      run: npm outdated || true
 
+  # Job 2: Build and Test Docker Image
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        load: true
+        tags: ${{ env.DOCKER_IMAGE_NAME }}:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Test Docker image
+      run: |
+        docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:test node --version
+        docker run --rm ${{ env.DOCKER_IMAGE_NAME }}:test npm --version
 
-     
+  # Job 3: Deploy to Production (only on main branch)
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh/
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        cat >> ~/.ssh/config << EOF
+        Host deploy-server
+          HostName ${{ secrets.DEPLOY_HOST }}
+          User ${{ secrets.DEPLOY_USER }}
+          IdentityFile ~/.ssh/deploy_key
+          StrictHostKeyChecking no
+        EOF
+    
+    - name: Copy files to server
+      run: |
+        rsync -avz --delete \
+          --exclude '.git' \
+          --exclude 'node_modules' \
+          --exclude '.env' \
+          --exclude 'logs' \
+          -e "ssh -i ~/.ssh/deploy_key" \
+          ./ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/Daily-Standup-Chatbot/
+    
+    - name: Deploy on server
+      run: |
+        ssh deploy-server << 'EOF'
+          cd ~/Daily-Standup-Chatbot
+          
+          # Pull latest changes
+          git pull origin main
+          
+          # Install dependencies
+          npm ci --production
+          
+          # Create .env file from secrets
+          cat > .env << EOL
+          PORT=${{ secrets.PORT }}
+          SLACK_BOT_TOKEN=${{ secrets.SLACK_BOT_TOKEN }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          CLIENT_ID=${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
+          REDIRECT_URI=${{ secrets.REDIRECT_URI }}
+          EOL
+          
+          # Restart with PM2
+          pm2 restart ecosystem.config.js || pm2 start ecosystem.config.js
+          
+          # Save PM2 configuration
+          pm2 save
+          
+          # Check status
+          pm2 status
+        EOF
 
-      
+  # Job 4: Deploy to Staging (for features branch)
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/features' && github.event_name == 'push'
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh/
+        echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/staging_deploy_key
+        chmod 600 ~/.ssh/staging_deploy_key
+        cat >> ~/.ssh/config << EOF
+        Host staging-server
+          HostName ${{ secrets.STAGING_HOST }}
+          User ${{ secrets.STAGING_USER }}
+          IdentityFile ~/.ssh/staging_deploy_key
+          StrictHostKeyChecking no
+        EOF
+    
+    - name: Deploy to staging
+      run: |
+        ssh staging-server << 'EOF'
+          cd ~/Daily-Standup-Chatbot-staging
+          git pull origin features
+          npm ci --production
+          pm2 restart ecosystem.config.js --env staging || pm2 start ecosystem.config.js --env staging
+          pm2 save
+        EOF
