@@ -18,7 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 // Supported programming languages
 const SUPPORTED_LANGUAGES = [
   "JavaScript", "TypeScript", "Python", "Java", "C++", "C#", "Go", "Rust",
-  "PHP", "Ruby", "Swift", "Kotlin", "HTML", "CSS", "SQL", "Shell/Bash"
+   "Ruby", "Swift", "Kotlin", "HTML", "CSS", "SQL", "Shell/Bash"
 ];
 
 // In-memory storage for code reviews
