@@ -1,5 +1,3 @@
-# Create correct .gitignore
-@"
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -39,4 +37,17 @@ aws_config.json
 
 # Docker
 .dockerignore
-"@ | Out-File -FilePath .gitignore -Encoding UTF8 -Force
+
+# Terraform
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

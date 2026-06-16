@@ -2,7 +2,10 @@ name: Deploy Features Branch to EC2
 
 on:
   push:
-    branches: [ features ]
+    branches: [ main ]
+    paths-ignore:
+      - 'infra/**'
+      - '**.tf'
   workflow_dispatch:
 
 jobs:
@@ -45,7 +48,7 @@ jobs:
               daily-standup-chatbot:latest
             echo "Cleaning up old images..."
             docker image prune -f
-            echo "✅ Deployment completed successfully!"
+            echo " Deployment completed successfully!"
           EOF
       
       - name: Verify deployment
