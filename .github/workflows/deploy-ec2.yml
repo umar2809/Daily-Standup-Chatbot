@@ -2,7 +2,7 @@ name: Deploy Features Branch to EC2
 
 on:
   push:
-    branches: [ main ]
+    branches: [ features ]
     paths-ignore:
       - 'infra/**'
       - '**.tf'
