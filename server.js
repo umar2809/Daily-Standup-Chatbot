@@ -501,6 +501,8 @@ app.post("/slack/events", async (req, res) => {
 }
   }
 });
+app.get("/", (req, res) => res.status(200).send("OK"));
+
 //  Server Listen
 app.listen(port, () => {
   console.log("Slack bot server running");
