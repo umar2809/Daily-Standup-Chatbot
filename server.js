@@ -8,7 +8,21 @@ const app = express();
 const port = process.env.PORT || 4000;
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
+});
+
+const generateAI = async (systemPrompt, userContent) => {
+  const response = await groq.chat.completions.create({
+    model: "llama-3.3-70b-versatile",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
+  });
+  return response.choices[0].message.content.trim();
+};
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -27,12 +41,8 @@ const codeReviewStorage = new Map();
 // Analyze code for errors, bugs, and improvements
 const analyzeCode = async (code, language) => {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert code reviewer and ${language} developer. Analyze the following code and provide:
+    return await generateAI(
+      `You are an expert code reviewer and ${language} developer. Analyze the following code and provide:
 1. **Syntax Errors**: List any syntax errors found
 2. **Logic Errors**: Identify potential logic bugs
 3. **Security Issues**: Point out any security vulnerabilities (SQL injection, XSS, etc.)
@@ -41,12 +51,8 @@ const analyzeCode = async (code, language) => {
 6. **Overall Score**: Rate the code quality from 1-10
 
 Format your response clearly with headers for each section. Be concise but thorough.`,
-        },
-        { role: "user", content: `Language: ${language}\n\nCode:\n\`\`\`\n${code}\n\`\`\`` },
-      ],
-      max_tokens: 1500,
-    });
-    return response.choices[0].message.content.trim();
+      `Language: ${language}\n\nCode:\n\`\`\`\n${code}\n\`\`\``
+    );
   } catch (error) {
     console.error("Error analyzing code:", error);
     return "Unable to analyze code. Please try again.";
@@ -56,18 +62,10 @@ Format your response clearly with headers for each section. Be concise but thoro
 // Fix code errors automatically
 const fixCode = async (code, language, errors) => {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert ${language} developer. Fix the following code based on the errors identified. Return ONLY the corrected code without explanations.`,
-        },
-        { role: "user", content: `Language: ${language}\n\nOriginal Code:\n\`\`\`\n${code}\n\`\`\`\n\nErrors to fix:\n${errors}` },
-      ],
-      max_tokens: 2000,
-    });
-    return response.choices[0].message.content.trim();
+    return await generateAI(
+      `You are an expert ${language} developer. Fix the following code based on the errors identified. Return ONLY the corrected code without explanations.`,
+      `Language: ${language}\n\nOriginal Code:\n\`\`\`\n${code}\n\`\`\`\n\nErrors to fix:\n${errors}`
+    );
   } catch (error) {
     console.error("Error fixing code:", error);
     return null;
@@ -77,15 +75,10 @@ const fixCode = async (code, language, errors) => {
 // Detect programming language from code
 const detectLanguage = async (code) => {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        { role: "system", content: "Identify the programming language of the following code. Respond with ONLY the language name (e.g., 'JavaScript', 'Python', 'Java')." },
-        { role: "user", content: code },
-      ],
-      max_tokens: 20,
-    });
-    return response.choices[0].message.content.trim();
+    return await generateAI(
+      "Identify the programming language of the following code. Respond with ONLY the language name (e.g., 'JavaScript', 'Python', 'Java').",
+      code
+    );
   } catch (error) {
     console.error("Error detecting language:", error);
     return "Unknown";
@@ -451,15 +444,10 @@ app.post("/slack/events", async (req, res) => {
       .replace(/<#([^>]+)>/g, "")
       .trim();
 
-    const summaryResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        { role: "system", content: "Summarize the following worklog into exactly 6–7 clear bullet points. Each point should represent a distinct task or update." },
-        { role: "user", content: cleanedText },
-      ],
-    });
-
-    const summary = summaryResponse.choices[0].message.content.trim();
+    const summary = await generateAI(
+      "Summarize the following worklog into exactly 6–7 clear bullet points. Each point should represent a distinct task or update.",
+      cleanedText
+    );
     const prefix = botMentioned ? "[SUMMARY] This is work log summary\n" : "";
 
     await client.chat.postMessage({
@@ -486,15 +474,10 @@ app.post("/slack/events", async (req, res) => {
 
     if (!cleanedText) continue;
 
-    const summaryResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        { role: "system", content: "Summarize the following worklog into 6–7 clear bullet points." },
-        { role: "user", content: cleanedText },
-      ],
-    });
-
-    const summary = summaryResponse.choices[0].message.content.trim();
+    const summary = await generateAI(
+      "Summarize the following worklog into 6–7 clear bullet points.",
+      cleanedText
+    );
     const prefix = botMentioned ? "[SUMMARY] This is work log summary\n" : "";
     const finalSummary = `${prefix}User: ${userName}\nProject: #${channelName}\n${summary}`;
 
@@ -518,6 +501,8 @@ app.post("/slack/events", async (req, res) => {
 }
   }
 });
+app.get("/", (req, res) => res.status(200).send("OK"));
+
 //  Server Listen
 app.listen(port, () => {
   console.log("Slack bot server running");
