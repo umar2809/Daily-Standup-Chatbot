@@ -166,6 +166,88 @@ Or use quick review:
 
 ---
 
+## Nginx & SSL
+
+Nginx acts as a reverse proxy in front of the app on port 4000, handling HTTPS termination via Let's Encrypt.
+
+### Install Nginx & Certbot
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+```
+
+### Nginx Configuration
+
+Create `/etc/nginx/sites-available/dailychat`:
+
+```nginx
+server {
+    listen 80;
+    server_name dailychat.ddns.net;
+
+    location / {
+        proxy_pass http://localhost:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/dailychat /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Obtain SSL Certificate
+
+```bash
+sudo certbot --nginx -d dailychat.ddns.net
+```
+
+Certbot automatically updates the Nginx config with HTTPS and sets up auto-renewal. Verify renewal works:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+---
+
+## CI/CD Pipeline
+
+Automated deployments are configured via GitHub Actions (`.github/workflows/deploy-ec2.yml`).
+
+### How It Works
+
+Every push to the `features` branch (excluding `infra/` and `.tf` files) triggers an automatic deployment to the EC2 instance:
+
+1. **Checkout** — pulls latest code
+2. **SSH into EC2** — connects using a stored deploy key
+3. **Pull & Build** — runs `git pull` and rebuilds the Docker image
+4. **Restart Container** — stops old container, starts new one with `--env-file .env`
+5. **Verify** — hits the `/slack/events` endpoint to confirm the app is live
+
+### GitHub Secrets Required
+
+| Secret | Description |
+|---|---|
+| `AWS_SSH_KEY` | Private SSH key for EC2 access |
+| `AWS_USER` | EC2 username (e.g. `ubuntu`) |
+| `AWS_HOST` | EC2 public IP or domain |
+
+### Setup
+
+1. Go to your GitHub repo → **Settings** → **Secrets and variables** → **Actions**
+2. Add the three secrets above
+3. Push to `features` branch — deployment runs automatically
+
+---
+
 ## Infrastructure
 
 Provisioned with Terraform in `infra/`:
