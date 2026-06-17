@@ -2,21 +2,26 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const { WebClient } = require("@slack/web-api");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { OpenAI } = require("openai");
 
 const app = express();
 const port = process.env.PORT || 4000;
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
+});
 
 const generateAI = async (systemPrompt, userContent) => {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-lite",
-    systemInstruction: systemPrompt,
+  const response = await groq.chat.completions.create({
+    model: "llama-3.3-70b-versatile",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
   });
-  const result = await model.generateContent(userContent);
-  return result.response.text().trim();
+  return response.choices[0].message.content.trim();
 };
 
 app.use(express.json());
